@@ -1,0 +1,319 @@
+# gradebook.py
+# Name: [Drishti]
+# Date: [26-11-2025]
+# Title: GradeBook Analyzer - Mini Project Assignment 2
+
+import csv
+import sys
+from statistics import median
+
+# --- Global Data Structure (Example) ---
+# Will be populated by Task 2
+# Example: marks = {"Alice": 78, "Bob": 92, "Charlie": 65, "Diana": 35, "Eve": 80}
+marks = {}
+
+
+# --- Task 3: Statistical Analysis Functions ---
+
+def calculate_average(marks_dict):
+    """Calculates the mean (average) score."""
+    if not marks_dict:
+        return 0.0
+    # Extract only the scores (values) from the dictionary
+    scores = list(marks_dict.values())
+    return sum(scores) / len(scores)
+
+
+def calculate_median(marks_dict):
+    """Calculates the median score."""
+    if not marks_dict:
+        return 0.0
+    scores = list(marks_dict.values())
+    # The 'statistics' module provides a reliable median function
+    return median(scores)
+
+
+def find_max_score(marks_dict):
+    """Finds the maximum score."""
+    if not marks_dict:
+        return 0
+    return max(marks_dict.values())
+
+
+def find_min_score(marks_dict):
+    """Finds the minimum score."""
+    if not marks_dict:
+        return 0
+    return min(marks_dict.values())
+
+
+# --- Task 4: Grade Assignment Function ---
+
+def assign_grade(score):
+    """Assigns a letter grade based on the score."""
+    # [span_0](start_span)A: 90+, B: 80–89, C: 70–79, D: 60–69, F: <60[span_0](end_span)
+    if score >= 90:
+        return "A"
+    elif score >= 80:
+        return "B"
+    elif score >= 70:
+        return "C"
+    elif score >= 60:
+        return "D"
+    else:
+        return "F"
+
+
+def calculate_grades_and_distribution(marks_dict):
+    """Assigns grades and calculates the distribution count."""
+    grades_dict = {}
+    grade_distribution = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
+
+    for name, score in marks_dict.items():
+        grade = assign_grade(score)
+        grades_dict[name] = grade
+        grade_distribution[grade] += 1
+
+    return grades_dict, grade_distribution
+
+
+# --- Task 2: Data Entry or CSV Import Functions ---
+
+def manual_data_entry():
+    """Allows manual input of student names and marks."""
+    print("\n--- Manual Data Entry ---")
+    current_marks = {}
+    print("Enter student name and mark (e.g., Jane 75). Type 'done' to finish.")
+    
+    while True:
+        try:
+            user_input = input("> ").strip()
+            if user_input.lower() == 'done':
+                break
+            
+            # Split the input into parts (expecting name and mark)
+            parts = user_input.split()
+            if len(parts) < 2:
+                print("Invalid format. Please enter name and mark (e.g., Alex 88).")
+                continue
+
+            # The name might be multiple words, so join them except for the last part (the score)
+            student_name = " ".join(parts[:-1]).strip().title()
+            score_str = parts[-1]
+            
+            score = int(score_str)
+            if not (0 <= score <= 100):
+                print("Score must be between 0 and 100.")
+                continue
+            
+            current_marks[student_name] = score
+        
+        except ValueError:
+            print("Invalid mark entered. Please enter a whole number for the mark.")
+        except EOFError:
+            # Handle Ctrl+D or Ctrl+Z for graceful exit during input
+            break
+            
+    print(f"\nSuccessfully stored {len(current_marks)} student record(s).")
+    return current_marks
+
+
+def load_csv_data(filepath):
+    """Loads student names and marks from a CSV file."""
+    print(f"\n--- Loading Data from {filepath} ---")
+    current_marks = {}
+    try:
+        with open(filepath, mode='r', newline='') as file:
+            reader = csv.reader(file)
+            header = next(reader, None)  # Read header row, if present
+
+            # Simple logic: Assume first column is Name, second is Mark
+            # This is robust for a file with just two columns, or if we ignore extra columns
+            if header and len(header) < 2:
+                 # If only one column, we assume it's marks without names, which is less ideal.
+                 # For simplicity, we assume a two-column structure (Name, Mark).
+                 print("Warning: CSV file seems to be missing a Name or Mark column. Expected at least two columns.")
+                 # Fall through to process if possible, but warn the user.
+
+            count = 0
+            for row in reader:
+                if len(row) >= 2:
+                    try:
+                        name = row[0].strip().title()
+                        score = int(row[1].strip())
+                        if 0 <= score <= 100:
+                             current_marks[name] = score
+                             count += 1
+                        else:
+                             print(f"Skipping record for '{name}': Score {score} out of range.")
+                    except ValueError:
+                        print(f"Skipping row: Could not parse score from: {row}")
+                elif row:
+                    print(f"Skipping row: Insufficient data columns: {row}")
+
+        print(f"Successfully loaded {count} student record(s) from CSV.")
+        return current_marks
+        
+    except FileNotFoundError:
+        print(f"Error: The file '{filepath}' was not found.")
+        return {}
+    except Exception as e:
+        print(f"An error occurred while reading the CSV file: {e}")
+        return {}
+
+
+# --- Main Analysis Function (Task 3, 4, 5, 6) ---
+
+def run_analysis(marks_data):
+    """Performs all statistical analysis, grading, and prints the summary."""
+    if not marks_data:
+        print("\nNo data to analyze. Please load or enter student records.")
+        return
+
+    # 1. Statistical Analysis (Task 3)
+    print("\n" + "="*40)
+    print("        📊 GradeBook Analysis Summary")
+    print("="*40)
+    
+    # Get only the list of scores for stats calculation
+    scores_list = list(marks_data.values()) 
+    
+    average = calculate_average(marks_data)
+    median_score = calculate_median(marks_data)
+    max_score = find_max_score(marks_data)
+    min_score = find_min_score(marks_data)
+
+    print(f"Total Students: {len(marks_data)}")
+    print(f"Class Average:  {average:.2f}")
+    print(f"Median Score:   {median_score:.2f}")
+    print(f"Highest Score:  {max_score}")
+    print(f"Lowest Score:   {min_score}")
+    print("-" * 40)
+    
+    # 2. Grade Assignment and Distribution (Task 4)
+    grades_dict, grade_distribution = calculate_grades_and_distribution(marks_data)
+    
+    print("\n🎓 Grade Distribution:")
+    # Print the distribution in a readable format, sorted by grade
+    for grade in sorted(grade_distribution.keys()):
+        count = grade_distribution[grade]
+        print(f"  {grade}: {count} student(s)")
+    print("-" * 40)
+    
+    # 3. Pass/Fail Filter (Task 5)
+    
+    # [span_1](start_span)Define pass/fail criteria (score >= 40 for pass)[span_1](end_span)
+    PASS_THRESHOLD = 40
+    
+    # [span_2](start_span)[span_3](start_span)Use list comprehensions for conditional filtering[span_2](end_span)[span_3](end_span)
+    passed_students = [
+        (name, marks_data[name]) for name in marks_data 
+        if marks_data[name] >= PASS_THRESHOLD
+    ]
+    
+    failed_students = [
+        (name, marks_data[name]) for name in marks_data 
+        if marks_data[name] < PASS_THRESHOLD
+    ]
+
+    print(f"\n✅ Pass/Fail Summary (Pass >= {PASS_THRESHOLD}):")
+    print(f"  Passed: {len(passed_students)} student(s)")
+    # Optional: Print names for review
+    # print("  Passed Students:", ", ".join([name for name, score in passed_students]))
+
+    print(f"  Failed: {len(failed_students)} student(s)")
+    # Optional: Print names for review
+    # print("  Failed Students:", ", ".join([name for name, score in failed_students]))
+    print("-" * 40)
+    
+    # 4. Results Table (Task 6)
+    print("\n📝 Detailed Results Table:")
+    
+    # [span_4](start_span)Format the table header (use f-strings and alignment for clean formatting[span_4](end_span))
+    header = f"{'Name':<20}{'Marks':>8}{'Grade':>8}"
+    print(header)
+    print("-" * 36)
+    
+    # Print each student's results
+    # Iterate over the original marks_data to maintain original entry order if available
+    for name in sorted(marks_data.keys()):
+        mark = marks_data[name]
+        grade = grades_dict[name]
+        print(f"{name:<20}{mark:>8}{grade:>8}")
+    
+    print("-" * 36)
+
+
+# --- Task 1 & 6: Main CLI Loop and Menu ---
+
+def print_menu():
+    """Prints the main usage menu."""
+    print("\n--- GradeBook Analyzer CLI Menu ---")
+    print("1. Enter marks manually[span_5](end_span)")
+    print("2. Load marks from a CSV file[span_6](end_span)")
+    print("3. Run analysis and print summary")
+    # Menu option 4 is not strictly required but is helpful for clearing data
+    if marks:
+        print("4. View current data") 
+        print("5. Clear current data")
+    print("E. Exit program")
+    print("-" * 35)
+
+
+def main_cli_loop():
+    """Implements the main CLI loop for repeated analysis or exit[span_7](end_span)[span_8](end_span)."""
+    global marks # Use the global marks dictionary
+
+    # Task 1: Welcome message
+    print("\n======================================")
+    print("  👋 Welcome to the GradeBook Analyzer")
+    print("======================================")
+    
+    while True:
+        print_menu()
+        choice = input("Enter your choice: ").strip().upper()
+        
+        if choice == '1':
+            new_marks = manual_data_entry()
+            # If data was entered, replace the current data
+            if new_marks:
+                 marks = new_marks
+        
+        elif choice == '2':
+            filepath = input("Enter the path to the CSV file (e.g., student_data.csv): ").strip()
+            new_marks = load_csv_data(filepath)
+            # If data was loaded, replace the current data
+            if new_marks:
+                marks = new_marks
+        
+        elif choice == '3':
+            run_analysis(marks)
+        
+        elif choice == '4' and marks:
+            print("\n--- Current Loaded Data ---")
+            for name, score in marks.items():
+                print(f"{name}: {score}")
+            print(f"Total records: {len(marks)}")
+            
+        elif choice == '5' and marks:
+            marks = {}
+            print("\n✅ Current data has been cleared.")
+            
+        elif choice == 'E':
+            print("\nGoodbye! Thank you for using the GradeBook Analyzer.")
+            sys.exit() # Exit the program
+        
+        else:
+            print("\n❌ Invalid choice. Please select an option from the menu.")
+            # Note: The case for 4 or 5 being selected when 'marks' is empty is handled implicitly here.
+
+
+# --- Execution Start ---
+
+if __name__ == "__main__":
+    # Check if a filename for CSV loading was passed as a command line argument
+    if len(sys.argv) > 1:
+        csv_file = sys.argv[1]
+        marks = load_csv_data(csv_file)
+    
+    main_cli_loop()
