@@ -1,0 +1,425 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+import glob
+from pathlib import Path
+from datetime import datetime
+import logging
+
+# --- Configuration and Setup ---
+DATA_DIR = Path('data')
+OUTPUT_DIR = Path('output')
+LOG_FILE = OUTPUT_DIR / 'processing.log'
+
+# Set up logging
+OUTPUT_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(exist_ok=True)
+logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Mock Data Generation (For testing purposes) ---
+def generate_mock_data():
+    """Generates simple mock CSV files for three buildings."""
+    buildings = ['Admin_A', 'Library_B', 'Labs_C']
+    dates = pd.date_range(start='2024-10-01', periods=40, freq='H')
+    
+    for building in buildings:
+        # Create different usage patterns
+        if 'Admin' in building:
+            kwh = (10 + 20 * (dates.hour > 8) * (dates.hour < 18) + 
+                   5 * (dates.day % 7 < 5) + 
+                   5 * random.rand(len(dates)))
+        elif 'Library' in building:
+            kwh = (15 + 30 * (dates.hour > 9) * (dates.hour < 22) + 
+                   2 * pd.np.random.rand(len(dates)))
+        else: # Labs
+            kwh = (5 + 40 * (dates.hour > 7) * (dates.hour < 20) + 
+                   10 * (dates.day % 7 < 5) + 
+                   8 * pd.np.random.rand(len(dates)))
+            
+        df = pd.DataFrame({
+            'Timestamp': dates,
+            'kwh': kwh.round(2)
+        })
+        # Save as a monthly file (simplified for this mock)
+        file_path = DATA_DIR / f'{building}_Oct2024.csv'
+        df.to_csv(file_path, index=False)
+        logging.info(f"Generated mock data for {building} at {file_path}")
+
+# Run mock data generation if no CSVs are found (remove this for real data)
+if not list(DATA_DIR.glob('*.csv')):
+   
+# --- End of Mock Data Generation ---
+
+
+# ====================================================================
+# Task 3: Object-Oriented Modeling (Building the core structure first)
+# ====================================================================
+
+    class MeterReading:
+      def __init__(self, timestamp, kwh):
+        if not isinstance(timestamp, pd.Timestamp):
+            raise ValueError("Timestamp must be a pandas Timestamp.")
+        if kwh < 0:
+            raise ValueError("Energy consumption (kwh) cannot be negative.")
+        
+        self.timestamp = timestamp
+        self.kwh = kwh
+
+class Building:
+    """Models a single campus building with its energy meter readings."""
+    def __init__(self, name): 
+        self.name = name
+        self.meter_readings = []
+        self._df = pd.DataFrame() # Internal DataFrame for easy calculation
+
+    def add_reading(self, timestamp, kwh):
+        """Adds a MeterReading object to the building's list."""
+        try:
+            reading = MeterReading(timestamp, kwh)
+            self.meter_readings.append(reading)
+        except ValueError as e:
+            logging.error(f"Error adding reading for {self.name}: {e}")
+
+    def load_from_dataframe(self, df):
+        """Sets the internal DataFrame from a combined/processed DataFrame."""
+        self._df = df.copy()
+        
+    def calculate_total_consumption(self):
+        """Calculates the total consumption from the internal DataFrame."""
+        if not self._df.empty:
+            return self._df['kwh'].sum()
+        return 0.0
+
+    def calculate_daily_totals(self):
+        """Calculates daily consumption totals."""
+        if self._df.empty:
+            return pd.DataFrame()
+        # Ensure 'Timestamp' is the index for resample
+        df = self._df.set_index('Timestamp')
+        return df['kwh'].resample('D').sum().reset_index(name='Daily_Total_kwh')
+
+    def calculate_weekly_aggregates(self):
+        """Calculates weekly consumption aggregates (sum and mean)."""
+        if self._df.empty:
+            return pd.DataFrame()
+        df = self._df.set_index('Timestamp')
+        weekly_sum = df['kwh'].resample('W').sum().rename('Weekly_Total_kwh')
+        weekly_mean = df['kwh'].resample('W').mean().rename('Weekly_Mean_kwh')
+        return pd.concat([weekly_sum, weekly_mean], axis=1).reset_index()
+    
+    def building_wise_summary(self):
+        """Calculates summary statistics for the building."""
+        if self._df.empty:
+            return {}
+        summary = {
+            'Name': self.name,
+            'Total_kwh': self.calculate_total_consumption(),
+            'Mean_kwh_per_hour': self._df['kwh'].mean(),
+            'Min_kwh_per_hour': self._df['kwh'].min(),
+            'Max_kwh_per_hour': self._df['kwh'].max()
+        }
+        return summary
+
+    def generate_report(self):
+        """Generates a brief textual summary for the building."""
+        summary = self.building_wise_summary()
+        report = (
+            f"--- Report for {self.name} ---\n"
+            f"Total Consumption: {summary.get('Total_kwh', 0):.2f} kWh\n"
+            f"Average Hourly Use: {summary.get('Mean_kwh_per_hour', 0):.2f} kWh\n"
+            f"Peak Hourly Load: {summary.get('Max_kwh_per_hour', 0):.2f} kWh\n"
+            "--------------------------\n"
+        )
+        return report
+
+class BuildingManager:
+    """Manages all Building objects and provides campus-level aggregation."""
+    def __init__(self):
+        self.buildings = {}
+        self.campus_df = pd.DataFrame()
+
+    def add_building(self, building):
+        """Adds a Building object to the manager."""
+        self.buildings[building.name] = building
+    
+    def load_data_to_buildings(self, df_combined):
+        """Distributes the combined DataFrame back into individual Building objects."""
+        self.campus_df = df_combined
+        for name, group_df in df_combined.groupby('Building_Name'):
+            if name not in self.buildings:
+                self.add_building(Building(name))
+            self.buildings[name].load_from_dataframe(group_df)
+    
+    def campus_summary(self):
+        """Aggregates summaries from all buildings into one DataFrame."""
+        summary_list = [b.building_wise_summary() for b in self.buildings.values()]
+        return pd.DataFrame(summary_list)
+
+
+# ====================================================================
+# Task 1: Data Ingestion and Validation
+# ====================================================================
+
+def ingest_and_validate_data(data_dir):
+    """
+    Automatically reads, validates, and combines multiple CSV files.
+    """
+    all_files = list(data_dir.glob('*.csv'))
+    if not all_files:
+        logging.warning("No CSV files found in the data directory.")
+        return pd.DataFrame()
+
+    df_list = []
+    
+    for file_path in all_files:
+        try:
+            # Extract metadata (Building Name from filename)
+            building_name = file_path.stem.split('_')[0] # Assumes format: BuildingName_MonthYear.csv
+
+            # Read CSV, handling corrupt lines by skipping them
+            df = pd.read_csv(file_path, 
+                             on_bad_lines='skip') # error_bad_lines is deprecated
+            
+            # Basic validation: Check for required columns
+            if 'Timestamp' not in df.columns or 'kwh' not in df.columns:
+                logging.error(f"Missing required columns in {file_path.name}. Skipping.")
+                continue
+
+            # Data Cleaning and Type Conversion
+            df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+            df['kwh'] = pd.to_numeric(df['kwh'], errors='coerce')
+            
+            # Remove rows with NaT (failed timestamp conversion) or NaN (failed kwh conversion)
+            df.dropna(subset=['Timestamp', 'kwh'], inplace=True)
+
+            # Add metadata columns
+            df['Building_Name'] = building_name
+            
+            df_list.append(df)
+            logging.info(f"Successfully processed {file_path.name}. Rows: {len(df)}")
+            
+        except FileNotFoundError:
+            logging.error(f"File not found: {file_path.name}")
+        except Exception as e:
+            logging.error(f"An unexpected error occurred processing {file_path.name}: {e}")
+
+    if not df_list:
+        logging.warning("No valid data frames were created.")
+        return pd.DataFrame()
+
+    # Combine all DataFrames
+    df_combined = pd.concat(df_list, ignore_index=True)
+    df_combined.sort_values(by=['Timestamp', 'Building_Name'], inplace=True)
+    
+    logging.info(f"Final combined DataFrame created with {len(df_combined)} records.")
+    return df_combined
+
+# ====================================================================
+# Task 2: Core Aggregation Logic
+# ====================================================================
+
+def calculate_campus_daily_totals(df):
+    """Calculates total campus consumption per day."""
+    if df.empty:
+        return pd.DataFrame()
+    # Ensure Timestamp is the index for resample, then sum all kwh
+    df_daily = df.set_index('Timestamp')['kwh'].resample('D').sum().reset_index(name='Campus_Daily_Total_kwh')
+    return df_daily
+
+def calculate_campus_weekly_aggregates(df):
+    """Calculates total campus consumption per week."""
+    if df.empty:
+        return pd.DataFrame()
+    df_weekly = df.set_index('Timestamp')['kwh'].resample('W').sum().reset_index(name='Campus_Weekly_Total_kwh')
+    return df_weekly
+
+def generate_building_wise_summary_table(manager):
+    """
+    Uses the BuildingManager to generate a summary table for all buildings.
+    """
+    return manager.campus_summary()
+
+# ====================================================================
+# Task 4: Visual Output with Matplotlib
+# ====================================================================
+
+def create_dashboard_visualization(df_combined, manager, output_path):
+    """
+    Generates a multi-chart dashboard visualization and saves it as a PNG.
+    """
+    if df_combined.empty:
+        logging.warning("Cannot create visualization: DataFrame is empty.")
+        return
+    
+    # Calculate required dataframes
+    df_daily = calculate_campus_daily_totals(df_combined)
+    df_summary = manager.campus_summary()
+    
+    # 1. Trend Line – daily consumption over time for all buildings
+    df_building_daily = df_combined.set_index('Timestamp').groupby('Building_Name')['kwh'].resample('D').sum().unstack(level=0)
+    
+    # 2. Bar Chart – compare average weekly usage across buildings
+    df_weekly_avg = df_combined.set_index('Timestamp').groupby('Building_Name')['kwh'].resample('W').mean().groupby('Building_Name').mean()
+    
+    # 3. Scatter Plot – plot peak-hour consumption vs. time/building (using hour of day)
+    # Get the hour of the day
+    df_combined['Hour'] = df_combined['Timestamp'].dt.hour
+    
+    # Set up the figure layout (1 row, 3 columns)
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    
+    # --- Chart 1: Daily Consumption Trend Line ---
+    df_building_daily.plot(ax=axes[0], title='Daily Consumption Trend (All Buildings)', 
+                           legend=True, style='-o', markersize=3)
+    axes[0].set_xlabel('Date')
+    axes[0].set_ylabel('Consumption (kWh)')
+    axes[0].grid(True)
+    
+    # --- Chart 2: Average Weekly Consumption Bar Chart ---
+    df_weekly_avg.sort_values(ascending=False).plot(kind='bar', ax=axes[1], 
+                                                    title='Average Weekly Hourly Usage by Building', 
+                                                    color=plt.cm.Set2.colors) # Use a color map for variety
+    axes[1].set_xlabel('Building Name')
+    axes[1].set_ylabel('Avg. Hourly kWh (Weekly)')
+    axes[1].tick_params(axis='x', rotation=45)
+    axes[1].grid(axis='y')
+
+    # --- Chart 3: Hourly Consumption Scatter Plot ---
+    # Plot consumption by hour for each building
+    for name in df_combined['Building_Name'].unique():
+        data = df_combined[df_combined['Building_Name'] == name]
+        axes[2].scatter(data['Hour'], data['kwh'], label=name, alpha=0.6, s=10)
+    
+    axes[2].set_title('Hourly Load Profile')
+    axes[2].set_xlabel('Hour of Day (0-23)')
+    axes[2].set_ylabel('Consumption (kWh)')
+    axes[2].set_xticks(range(0, 24, 2))
+    axes[2].legend(title='Building', loc='upper right')
+    axes[2].grid(True)
+    
+    # Finalize and save
+    plt.tight_layout()
+    plt.suptitle("Campus Energy-Use Dashboard", fontsize=16, y=1.02)
+    plt.savefig(output_path)
+    logging.info(f"Dashboard visualization saved to {output_path}")
+
+# ====================================================================
+# Task 5: Persistence and Executive Summary
+# ====================================================================
+
+def generate_executive_summary(df_combined, df_summary, daily_totals, output_path):
+    """
+    Generates a concise written report from the analysis.
+    """
+    if df_combined.empty or df_summary.empty or daily_totals.empty:
+        summary_text = "ERROR: Analysis incomplete due to missing data."
+        logging.error("Summary generation failed due to empty dataframes.")
+    else:
+        # Total campus consumption
+        total_campus_kwh = df_combined['kwh'].sum()
+        
+        # Highest-consuming building
+        highest_kwh = df_summary['Total_kwh'].max()
+        highest_building = df_summary.loc[df_summary['Total_kwh'].idxmax(), 'Name']
+        
+        # Peak load time (find the hour with the maximum total consumption)
+        df_peak = df_combined.groupby(df_combined['Timestamp'].dt.round('H'))['kwh'].sum()
+        peak_time = df_peak.idxmax()
+        peak_load = df_peak.max()
+        
+        # Weekly/daily trends (simple average daily/weekly use)
+        avg_daily_kwh = daily_totals['Campus_Daily_Total_kwh'].mean()
+        # Assume weekly total is roughly 7 * avg_daily
+        avg_weekly_kwh = avg_daily_kwh * 7 
+
+        summary_text = (
+            "================================================\n"
+            "   Campus Energy-Use Executive Summary\n"
+            "================================================\n"
+            f"Analysis Period: {df_combined['Timestamp'].min().date()} to {df_combined['Timestamp'].max().date()}\n\n"
+            
+            f"1. Total Consumption: {total_campus_kwh:,.2f} kWh\n"
+            
+            f"2. Highest-Consuming Building:\n"
+            f"   - **{highest_building}** with a total of {highest_kwh:,.2f} kWh.\n\n"
+            
+            f"3. Peak Load Time:\n"
+            f"   - The highest recorded load was **{peak_load:,.2f} kWh** at **{peak_time}**.\n\n"
+            
+            f"4. Consumption Trends:\n"
+            f"   - The average daily campus consumption was {avg_daily_kwh:,.2f} kWh.\n"
+            f"   - The average weekly consumption was approximately {avg_weekly_kwh:,.2f} kWh.\n"
+            "================================================\n"
+        )
+    
+    # Print and save summary
+    print("\n" + summary_text)
+    with open(output_path, 'w') as f:
+        f.write(summary_text)
+    logging.info(f"Executive summary saved to {output_path}")
+
+def persistence_export(df_combined, df_summary, output_dir):
+    """
+    Exports the final processed datasets to CSV files.
+    """
+    if not df_combined.empty:
+        processed_path = output_dir / 'cleaned_energy_data.csv'
+        df_combined.to_csv(processed_path, index=False)
+        logging.info(f"Processed dataset exported to {processed_path}")
+    
+    if not df_summary.empty:
+        summary_path = output_dir / 'building_summary.csv'
+        df_summary.to_csv(summary_path, index=False)
+        logging.info(f"Summary stats exported to {summary_path}")
+
+# ====================================================================
+# Main Execution Flow
+# ====================================================================
+
+def main_energy_dashboard_pipeline():
+    """Executes the entire end-to-end data pipeline."""
+    
+    print("Starting Campus Energy Dashboard Pipeline...")
+    logging.info("Starting pipeline execution.")
+    
+    # 1. Task 1: Data Ingestion and Validation
+    df_combined = ingest_and_validate_data(DATA_DIR)
+    if df_combined.empty:
+        print("Pipeline failed: No valid data to process.")
+        logging.error("Pipeline terminated: No valid data.")
+        return
+
+    # Initialize Manager and load data into OOP model (Task 3 integration)
+    manager = BuildingManager()
+    manager.load_data_to_buildings(df_combined)
+    
+    # 2. Task 2 & Task 3: Core Aggregation and OOP Model Usage
+    campus_daily_totals = calculate_campus_daily_totals(df_combined)
+    # Individual building reports/calculations can be accessed via:
+    # print(manager.buildings['Admin_A'].generate_report())
+    
+    # Generate the campus-wide summary table (expected output for Task 2/3)
+    df_summary_stats = generate_building_wise_summary_table(manager)
+    
+    # 3. Task 4: Visual Output
+    dashboard_png_path = OUTPUT_DIR / 'dashboard.png'
+    create_dashboard_visualization(df_combined, manager, dashboard_png_path)
+    
+    # 4. Task 5: Persistence and Executive Summary
+    persistence_export(df_combined, df_summary_stats, OUTPUT_DIR)
+    
+    summary_txt_path = OUTPUT_DIR / 'summary.txt'
+    generate_executive_summary(df_combined, df_summary_stats, campus_daily_totals, summary_txt_path)
+    
+    print("\nPipeline Complete! Outputs saved in the 'output' directory.")
+    logging.info("Pipeline execution finished successfully.")
+
+if __name__ == '__main__':
+    # Ensure matplotlib uses a non-interactive backend if running headless
+    try:
+        plt.switch_backend('Agg')
+    except ImportError:
+        pass # Ignore if agg is not available
+        
+    main_energy_dashboard_pipeline()
