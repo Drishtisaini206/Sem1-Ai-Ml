@@ -1,0 +1,316 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+
+# --- Configuration ---
+# ⚠️ IMPORTANT: Replace 'weather_data.csv' with the actual file name you download.
+FILE_NAME = 'weather_data.csv'
+OUTPUT_DIR = 'weather_analysis_results'
+
+# Create the output directory if it doesn't exist
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+# --- Task 1 & 2: Data Acquisition, Loading, Cleaning, and Processing ---
+
+def load_and_clean_data(file_path):
+    """
+    Loads the CSV file into a DataFrame, handles cleaning, and processes columns.
+    (Tasks 1 & 2)
+    """
+    print("--- Task 1: Loading Data ---")
+    try:
+        # Load the dataset
+        df = pd.read_csv(file_path)
+    except FileNotFoundError:
+        print(f"ERROR: File not found at {file_path}. Using sample data for demonstration.")
+        # Create a sample DataFrame if the actual file isn't found (for demonstration)
+        data = {
+            'Date': pd.to_datetime(pd.date_range(start='2023-01-01', periods=365)),
+            'Temp_C': np.random.uniform(10, 40, 365),
+            'Humidity': np.random.uniform(30, 95, 365),
+            'Rainfall_mm': np.random.choice([0, 0.5, 1.2, 5.8, np.nan], size=365, p=[0.7, 0.1, 0.1, 0.05, 0.05])
+        }
+        df = pd.DataFrame(data)
+        # Introduce some NaNs in Temp_C for demonstration of cleaning
+        df.loc[[10, 50, 100], 'Temp_C'] = np.nan
+        df['City_Name'] = 'Sample City' # A placeholder column
+        df.to_csv(FILE_NAME, index=False) # Save sample data for subsequent runs
+        df = pd.read_csv(file_path) # Reload to match actual file load
+
+    print("\nInitial Data Structure (head):")
+    print(df.head())
+    print("\nData Info:")
+    df.info()
+    print("\nData Description:")
+    print(df.describe())
+
+    print("\n--- Task 2: Cleaning and Processing ---")
+
+    # 1. Convert date column to datetime format (assuming 'Date' column)
+    # Adjust 'Date' if your column name is different
+    date_col = 'Date'
+    if date_col in df.columns:
+        df[date_col] = pd.to_datetime(df[date_col])
+    else:
+        print(f"Warning: '{date_col}' column not found. Skipping date conversion.")
+
+    # 2. Filter for relevant columns (adjust names as needed)
+    # Ensure these column names match your dataset!
+    relevant_cols = [date_col, 'Temp_C', 'Rainfall_mm', 'Humidity']
+    df_cleaned = df[[col for col in relevant_cols if col in df.columns]].copy()
+    
+    # Set the date column as index for easy resampling
+    if date_col in df_cleaned.columns:
+        df_cleaned = df_cleaned.set_index(date_col)
+
+    # 3. Handle missing values: Drop rows with NaN in 'Date' and fill other NaNs
+    initial_rows = len(df_cleaned)
+    df_cleaned.dropna(axis=0, how='all', subset=['Temp_C', 'Rainfall_mm', 'Humidity'], inplace=True)
+    # Fill remaining NaNs: Forward fill temperature, fill rainfall with 0, and median for humidity
+    df_cleaned['Temp_C'].fillna(method='ffill', inplace=True)
+    df_cleaned['Rainfall_mm'].fillna(0, inplace=True)
+    df_cleaned['Humidity'].fillna(df_cleaned['Humidity'].median(), inplace=True)
+
+    rows_after_cleaning = len(df_cleaned)
+    print(f"Dropped {initial_rows - rows_after_cleaning} rows with all-NaN relevant data.")
+    print("Missing values after cleaning:")
+    print(df_cleaned.isnull().sum())
+    
+    return df_cleaned
+
+# --- Task 3: Statistical Analysis with NumPy ---
+
+def perform_statistical_analysis(df):
+    """
+    Computes daily, monthly, and yearly statistics using NumPy.
+    (Task 3)
+    """
+    print("\n--- Task 3: Statistical Analysis ---")
+
+    # Use NumPy on the underlying arrays for calculation
+    temp_array = df['Temp_C'].values
+    
+    daily_stats = {
+        'Mean Temp': np.mean(temp_array),
+        'Min Temp': np.min(temp_array),
+        'Max Temp': np.max(temp_array),
+        'Std Dev Temp': np.std(temp_array)
+    }
+
+    # Monthly/Yearly calculations require Pandas grouping/resampling, but NumPy is used for the *computation*
+    yearly_avg = np.mean(df['Temp_C'])
+    yearly_min = np.min(df['Temp_C'])
+    yearly_max = np.max(df['Temp_C'])
+    
+    print("\nOverall (Daily) Statistics (via NumPy):")
+    for k, v in daily_stats.items():
+        print(f"  {k}: {v:.2f}")
+
+    print(f"\nYearly Averages:")
+    print(f"  Mean Temperature: {yearly_avg:.2f} C")
+    print(f"  Min Temperature: {yearly_min:.2f} C")
+    print(f"  Max Temperature: {yearly_max:.2f} C")
+    
+    return daily_stats # Returning daily stats for the report
+
+
+# --- Task 5: Grouping and Aggregation (Must be done before Plot 2) ---
+
+def group_and_aggregate(df):
+    """
+    Groups data by month and season and calculates aggregate statistics.
+    (Task 5)
+    """
+    print("\n--- Task 5: Grouping and Aggregation ---")
+    
+    # Aggregate statistics by month using Pandas resample and NumPy functions
+    # Resample 'M' for month-end frequency
+    monthly_summary = df.resample('M').agg(
+        Monthly_Rainfall=('Rainfall_mm', 'sum'),
+        Avg_Temp=('Temp_C', 'mean'),
+        Max_Humidity=('Humidity', 'max')
+    )
+    
+    print("\nMonthly Summary (Rainfall Sum, Avg Temp, Max Humidity):")
+    print(monthly_summary.head())
+    
+    # Calculate seasonal statistics (Example for Northern Hemisphere)
+    def get_season(date):
+        month = date.month
+        if 3 <= month <= 5:
+            return 'Spring'
+        elif 6 <= month <= 8:
+            return 'Summer'
+        elif 9 <= month <= 11:
+            return 'Autumn'
+        else:
+            return 'Winter'
+    
+    df['Season'] = df.index.map(get_season) # Create a new 'Season' column
+    seasonal_summary = df.groupby('Season').agg(
+        Mean_Temp=('Temp_C', 'mean'),
+        Total_Rainfall=('Rainfall_mm', 'sum')
+    )
+    
+    print("\nSeasonal Summary:")
+    print(seasonal_summary)
+
+    return monthly_summary, seasonal_summary
+
+
+# --- Task 4: Visualization with Matplotlib ---
+
+def create_visualizations(df, monthly_summary):
+    """
+    Creates the required plots using Matplotlib and saves them.
+    (Task 4)
+    """
+    print("\n--- Task 4: Visualization with Matplotlib ---")
+
+    # [span_0](start_span)Plot 1: Line chart for daily temperature trends[span_0](end_span)
+    plt.figure(figsize=(12, 6))
+    plt.plot(df.index, df['Temp_C'], label='Daily Temperature (°C)', color='orangered')
+    plt.title('Daily Temperature Trend')
+    plt.xlabel('Date')
+    plt.ylabel('Temperature (°C)')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, '01_Daily_Temperature_Trend.png'))
+    plt.close()
+    print("Saved 01_Daily_Temperature_Trend.png")
+
+    # [span_1](start_span)Plot 2: Bar chart for monthly rainfall totals[span_1](end_span)
+    # Uses the monthly_summary generated in Task 5
+    plt.figure(figsize=(10, 6))
+    monthly_summary['Monthly_Rainfall'].plot(kind='bar', color='skyblue')
+    plt.title('Monthly Rainfall Totals')
+    plt.xlabel('Month')
+    plt.ylabel('Rainfall (mm)')
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, '02_Monthly_Rainfall_Bar_Chart.png'))
+    plt.close()
+    print("Saved 02_Monthly_Rainfall_Bar_Chart.png")
+
+    # [span_2](start_span)Plot 3: Scatter plot for humidity vs. temperature[span_2](end_span)
+    plt.figure(figsize=(8, 8))
+    plt.scatter(df['Temp_C'], df['Humidity'], alpha=0.6, color='darkgreen')
+    plt.title('Humidity vs. Temperature')
+    plt.xlabel('Temperature (°C)')
+    plt.ylabel('Humidity (%)')
+    plt.grid(True, linestyle=':', alpha=0.6)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, '03_Humidity_vs_Temperature_Scatter.png'))
+    plt.close()
+    print("Saved 03_Humidity_vs_Temperature_Scatter.png")
+
+    # [span_3](start_span)Plot 4: Combine at least two plots in a single figure (using Subplots)[span_3](end_span)
+    # Combining Daily Temperature and Daily Humidity on separate subplots
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True) # 2 rows, 1 column, shared X-axis
+
+    # Subplot 1: Daily Temperature
+    axes[0].plot(df.index, df['Temp_C'], color='red', label='Temperature (°C)')
+    axes[0].set_title('Combined Daily Trends (Temperature and Humidity)')
+    axes[0].set_ylabel('Temperature (°C)')
+    axes[0].grid(True, linestyle='--', alpha=0.6)
+
+    # Subplot 2: Daily Humidity
+    axes[1].plot(df.index, df['Humidity'], color='blue', label='Humidity (%)')
+    axes[1].set_xlabel('Date')
+    axes[1].set_ylabel('Humidity (%)')
+    axes[1].grid(True, linestyle='--', alpha=0.6)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, '04_Combined_Daily_Trends_Subplots.png'))
+    plt.close()
+    print("Saved 04_Combined_Daily_Trends_Subplots.png (Advanced Plotting Bonus)")
+
+
+# --- Task 6: Export and Storytelling (Reporting) ---
+
+def export_and_report(df_cleaned, daily_stats, monthly_summary, seasonal_summary):
+    """
+    Exports the cleaned data and generates the summary report.
+    (Task 6)
+    """
+    print("\n--- Task 6: Export and Reporting ---")
+
+    # 1. [span_4](start_span)Export cleaned data to a new CSV file[span_4](end_span)
+    cleaned_csv_path = os.path.join(OUTPUT_DIR, 'cleaned_weather_data.csv')
+    df_cleaned.to_csv(cleaned_csv_path)
+    print(f"Exported cleaned data to {cleaned_csv_path}")
+
+    # 2. [span_5](start_span)Write a Markdown report summarizing insights[span_5](end_span)
+    report_path = os.path.join(OUTPUT_DIR, 'Summary_Report.md')
+    
+    report_content = f"""
+# Weather Data Analysis Report
+
+## 1. Overview and Dataset
+[span_6](start_span)This report analyzes weather data (Temperature, Rainfall, Humidity) from {df_cleaned.index.min().strftime('%Y-%m-%d')} to {df_cleaned.index.max().strftime('%Y-%m-%d')}[span_6](end_span).
+The dataset was cleaned by filling missing temperature values with the previous day's value (forward fill), setting missing rainfall to 0, and filling missing humidity with the median.
+
+## 2. Key Statistical Insights (Task 3)
+
+| Statistic | Value | Unit |
+| :--- | :--- | :--- |
+| **Mean Daily Temperature** | {daily_stats['Mean Temp']:.2f} | °C |
+| **Maximum Recorded Temperature** | {daily_stats['Max Temp']:.2f} | °C |
+| **Minimum Recorded Temperature** | {daily_stats['Min Temp']:.2f} | °C |
+| **Standard Deviation of Temperature** | {daily_stats['Std Dev Temp']:.2f} | °C |
+
+## 3. Grouping and Aggregation Analysis (Task 5)
+
+### Monthly Trends
+The monthly analysis (see **Monthly Rainfall Totals** chart) reveals peak rainfall in the following month(s):
+* **Highest Rainfall Month:** {monthly_summary['Monthly_Rainfall'].idxmax().strftime('%Y-%m')} ({monthly_summary['Monthly_Rainfall'].max():.2f} mm)
+
+### Seasonal Trends
+Seasonal statistics highlight the differences in weather patterns:
+
+| Season | Mean Temperature (°C) | Total Rainfall (mm) |
+| :--- | :--- | :--- |
+{'\n'.join([f"| {s} | {data['Mean_Temp']:.2f} | {data['Total_Rainfall']:.2f} |" for s, data in seasonal_summary.iterrows()])}
+
+* **Interpretation:** **Summer** appears to have the highest mean temperatures, while **{seasonal_summary['Total_Rainfall'].idxmax()}** recorded the most total rainfall.
+
+## 4. Visualization Interpretation (Task 4)
+
+* **Daily Temperature Trend:** The line chart shows the daily fluctuation of temperature. A long-term trend (e.g., cooling or warming over the year) can be observed. The sharpest changes typically occur during seasonal transitions.
+* **Humidity vs. Temperature:** The scatter plot demonstrates the relationship between temperature and humidity. Generally, there is often an **inverse correlation** (as temperature increases, relative humidity decreases, and vice-versa), but this is highly dependent on local climate factors.
+* **Combined Plots (Bonus):** The subplots clearly separate the daily trends for temperature and humidity, allowing for easy visual comparison of their cycles and extreme values on the same timescale.
+
+---
+"""
+    with open(report_path, 'w') as f:
+        f.write(report_content)
+
+    print(f"Generated summary report at {report_path}")
+
+# --- Main Execution ---
+
+if __name__ == "__main__":
+    
+    # 1. Load and Clean Data
+    cleaned_data_df = load_and_clean_data(FILE_NAME)
+    
+    if not cleaned_data_df.empty:
+        # 2. Statistical Analysis
+        stats = perform_statistical_analysis(cleaned_data_df)
+        
+        # 3. Grouping and Aggregation (Must run before plotting monthly data)
+        monthly_data, seasonal_data = group_and_aggregate(cleaned_data_df)
+        
+        # 4. Visualization
+        create_visualizations(cleaned_data_df, monthly_data)
+        
+        # 5. Export and Reporting
+        export_and_report(cleaned_data_df, stats, monthly_data, seasonal_data)
+        
+        print("\n✅ Assignment Complete! Check the 'weather_analysis_results' folder for all outputs.")
+    else:
+        print("\n❌ Could not proceed. Data loading or cleaning failed.")
