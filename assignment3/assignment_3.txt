@@ -1,0 +1,327 @@
+# library_manager.py
+# Complete Code for Mini Project Assignment: Library Inventory Manager
+# Fulfills Tasks 1 through 5 of the assignment.
+
+import json
+import logging
+from pathlib import Path
+import sys
+
+# --- Task 5: Exception Handling and Logging ---
+# [span_0](start_span)Configure Python's logging module with proper levels (INFO, ERROR)[span_0](end_span)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    # Optionally log to a file as well, uncomment the handlers below for file logging
+    # handlers=[
+    #     logging.FileHandler("library_manager.log"),
+    #     logging.StreamHandler(sys.stdout)
+    # ]
+)
+logger = logging.getLogger('LibraryManager')
+
+# ----------------------------------------------------------------------
+#                         TASK 1: Book Class Design
+# ----------------------------------------------------------------------
+
+class Book:
+    """
+    Represents a book in the library inventory with attributes and methods.
+    """
+    def __init__(self, title, author, isbn, status="available"):
+        """
+        [span_1](start_span)Initializes a new Book instance[span_1](end_span).
+        [span_2](start_span)Attributes: title, author, isbn, status (available or issued)[span_2](end_span).
+        """
+        self.title = title
+        self.author = author
+        self.isbn = isbn
+        self.status = status.lower()
+
+    def __str__(self):
+        """Returns a user-friendly string representation of the Book (magic method)[span_3](end_span)."""
+        return f"'{self.title}' by {self.author} (ISBN: {self.isbn}) - Status: {self.status.capitalize()}"
+
+    def to_dict(self):
+        """Returns a dictionary representation for JSON serialization[span_4](end_span)."""
+        return {
+            "title": self.title,
+            "author": self.author,
+            "isbn": self.isbn,
+            "status": self.status
+        }
+
+    def is_available(self):
+        """Checks if the book is currently available[span_5](end_span)."""
+        return self.status == "available"
+
+    def issue(self):
+        """Marks the book as issued if available[span_6](end_span)."""
+        if self.is_available():
+            self.status = "issued"
+            return True
+        return False
+
+    def return_book(self):
+        """Marks the book as available if issued[span_7](end_span)."""
+        if self.status == "issued":
+            self.status = "available"
+            return True
+        return False
+
+# ----------------------------------------------------------------------
+#                 TASK 2 & 3: Inventory Manager & File Persistence
+# ----------------------------------------------------------------------
+
+class LibraryInventory:
+    """
+    Manages the collection of Book objects and handles JSON file persistence.
+    """
+    def __init__(self, file_path="catalog.json"):
+        """Initializes the inventory and attempts to load data from the file."""
+        # [span_8](start_span)Task 2: Maintain a list of Book objects[span_8](end_span)
+        self.books = []
+        # [span_9](start_span)Task 3: Use pathlib.Path for file operations[span_9](end_span)
+        self.file_path = Path(file_path)
+        self._load_catalog()
+
+    def _load_catalog(self):
+        """Loads book data from the JSON file and handles missing/corrupted files."""
+        # [span_10](start_span)[span_11](start_span)Task 3 & 5: Use try-except-finally for file handling[span_10](end_span)[span_11](end_span)
+        try:
+            logger.debug(f"Attempting to load catalog from {self.file_path}")
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f) # Use json module[span_12](end_span)
+                # Recreate Book objects from the loaded data
+                self.books = [Book(**book_data) for book_data in data]
+                logger.info(f"Catalog loaded successfully. Total books: {len(self.books)}")
+
+        except FileNotFoundError:
+            # [span_13](start_span)Task 3: Handle missing file exceptions[span_13](end_span)
+            logger.info(f"Catalog file not found at {self.file_path}. Starting with an empty inventory.")
+            self.books = []
+        except json.JSONDecodeError:
+            # [span_14](start_span)Task 3: Handle corrupted file exceptions[span_14](end_span)
+            logger.error(f"ERROR: Corrupted JSON file at {self.file_path}. Starting with an empty inventory.")
+            self.books = []
+        except Exception as e:
+            logger.error(f"ERROR: An unexpected error occurred during file loading: {e}")
+            self.books = []
+        finally:
+            # Task 5: use finally block
+            logger.debug("Catalog load attempt finished.")
+
+    def _save_catalog(self):
+        """Saves the current book data to the JSON file."""
+        try:
+            data_to_save = [book.to_dict() for book in self.books]
+            # [span_15](start_span)Write to JSON file[span_15](end_span)
+            with open(self.file_path, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, indent=4)
+            logger.info(f"Catalog saved successfully to {self.file_path}.")
+        except IOError as e:
+            logger.error(f"ERROR: Could not write to file {self.file_path}: {e}")
+        except Exception as e:
+            logger.error(f"ERROR: An unexpected error occurred during file saving: {e}")
+
+    # Task 2: Inventory Management Methods
+    def add_book(self, book):
+        """Adds a new Book object and saves the catalog[span_16](end_span)."""
+        if not isinstance(book, Book):
+            logger.error("Invalid object type. Must be a Book instance.")
+            return False
+        if any(b.isbn == book.isbn for b in self.books):
+            logger.warning(f"Book with ISBN {book.isbn} already exists.")
+            return False
+
+        self.books.append(book)
+        self._save_catalog()
+        logger.info(f"Book added: '{book.title}'")
+        return True
+
+    def search_by_title(self, title):
+        """Searches for books whose title contains the search string (case-insensitive)[span_17](end_span)."""
+        title_lower = title.lower()
+        results = [book for book in self.books if title_lower in book.title.lower()]
+        return results
+
+    def search_by_isbn(self, isbn):
+        """Searches for a book by its exact ISBN[span_18](end_span)."""
+        for book in self.books:
+            if book.isbn == isbn:
+                return book
+        return None
+
+    def display_all(self):
+        """Returns a list of all Book objects in the inventory[span_19](end_span)."""
+        return self.books
+
+    # Methods utilizing Book class methods
+    def issue_book(self, isbn):
+        """Issues a book by ISBN if available, and saves the catalog."""
+        book = self.search_by_isbn(isbn)
+        if book:
+            if book.issue():
+                self._save_catalog()
+                logger.info(f"Book issued: '{book.title}' (ISBN: {isbn})")
+                return True, f"Book '{book.title}' successfully issued."
+            else:
+                logger.warning(f"Book with ISBN {isbn} is already issued.")
+                return False, "Book is already issued."
+        return False, "Book not found."
+
+    def return_book(self, isbn):
+        """Returns a book by ISBN if issued, and saves the catalog."""
+        book = self.search_by_isbn(isbn)
+        if book:
+            if book.return_book():
+                self._save_catalog()
+                logger.info(f"Book returned: '{book.title}' (ISBN: {isbn})")
+                return True, f"Book '{book.title}' successfully returned."
+            else:
+                logger.warning(f"Book with ISBN {isbn} was not issued.")
+                return False, "Book was not issued."
+        return False, "Book not found."
+
+# ----------------------------------------------------------------------
+#                   TASK 4 & 5: Menu-Driven CLI & Validation
+# ----------------------------------------------------------------------
+
+def validate_input(prompt, validator=None):
+    """Handles basic input validation with a try-except block[span_20](end_span)."""
+    while True:
+        try:
+            user_input = input(prompt).strip()
+            if not user_input:
+                print("Input cannot be empty. Please try again.")
+                continue
+            if validator and not validator(user_input):
+                print("Invalid input format. Please check and try again.")
+                continue
+            return user_input
+        except EOFError:
+            print("\nOperation cancelled.")
+            return None
+        except Exception as e:
+            logger.error(f"An unexpected input error occurred: {e}")
+            print("An error occurred during input. Please try again.")
+
+def main():
+    """Runs the interactive Command Line Interface (CLI)[span_21](end_span)."""
+    # Initialize the inventory manager, which attempts to load existing data
+    inventory = LibraryInventory()
+
+    def display_menu():
+        """Prints the menu options[span_22](end_span)."""
+        print("\n" + "="*50)
+        print("  📚 Library Inventory Manager CLI 📚")
+        print("="*50)
+        print("1. Add New Book")
+        print("2. Issue Book")
+        print("3. Return Book")
+        print("4. View All Books")
+        print("5. Search Book")
+        print("6. Exit")
+        print("-" * 50)
+
+    def handle_add_book():
+        """Handles adding a new book."""
+        print("\n--- Add New Book ---")
+        title = validate_input("Enter Title: ")
+        if not title: return
+
+        author = validate_input("Enter Author: ")
+        if not author: return
+
+        # Simple validation: ISBN must be digits only and reasonable length
+        isbn = validate_input("Enter ISBN (digits only): ", lambda x: x.isdigit() and 5 <= len(x) <= 20)
+        if not isbn: return
+
+        new_book = Book(title, author, isbn)
+        if inventory.add_book(new_book):
+            print(f"✅ Success: Book '{title}' added.")
+        else:
+            print(f"❌ Failed to add book. Check logs (ISBN unique constraint?).")
+
+    def handle_issue_return(operation):
+        """Handles issuing or returning a book."""
+        print(f"\n--- {operation.capitalize()} Book ---")
+        isbn = validate_input("Enter ISBN of the book: ", lambda x: x.isdigit())
+        if not isbn: return
+
+        if operation == 'issue':
+            success, message = inventory.issue_book(isbn)
+        else:
+            success, message = inventory.return_book(isbn)
+
+        if success:
+            print(f"✅ Success: {message}")
+        else:
+            print(f"⚠️ Warning: {message}")
+
+    def handle_view_all():
+        """Displays all books in the catalog."""
+        all_books = inventory.display_all()
+        print(f"\n--- All Books ({len(all_books)} Total) ---")
+        if not all_books:
+            print("The library catalog is currently empty.")
+            return
+
+        for i, book in enumerate(all_books, 1):
+            print(f"{i}. {book}")
+
+    def handle_search():
+        """Handles book searching by title or ISBN."""
+        print("\n--- Search Book ---")
+        print("1. Search by Title (partial match)")
+        print("2. Search by ISBN (exact match)")
+        choice = validate_input("Enter your search choice (1 or 2): ", lambda x: x in ['1', '2'])
+        if not choice: return
+
+        results = []
+        if choice == '1':
+            query = validate_input("Enter title (or part of title) to search: ")
+            if not query: return
+            results = inventory.search_by_title(query)
+            print(f"\nFound {len(results)} books matching title '{query}':")
+        elif choice == '2':
+            query = validate_input("Enter exact ISBN to search: ", lambda x: x.isdigit())
+            if not query: return
+            book = inventory.search_by_isbn(query)
+            if book:
+                results = [book]
+
+        if results:
+            for i, book in enumerate(results, 1):
+                print(f"{i}. {book}")
+        else:
+            print("No books found matching your query.")
+
+
+    while True:
+        display_menu()
+        choice = validate_input("Enter your choice (1-6): ", lambda x: x in ['1', '2', '3', '4', '5', '6'])
+        if not choice: continue
+
+        try:
+            if choice == '1':
+                handle_add_book()
+            elif choice == '2':
+                handle_issue_return('issue')
+            elif choice == '3':
+                handle_issue_return('return')
+            elif choice == '4':
+                handle_view_all()
+            elif choice == '5':
+                handle_search()
+            elif choice == '6':
+                print("👋 Exiting Library Inventory Manager. Goodbye!")
+                # Task 6: While the assignment asks for packaging, this single file serves as the executable script.
+                sys.exit(0)
+        except Exception as e:
+            # Task 5: General exception handling for CLI flow
+            logger.error(f"ERROR: An unexpected error occurred in the CLI: {e}")
+            print("An unexpected error occurred. Please try again or check the logs.")
+
+if __name__ == '__main__':
+    main()
